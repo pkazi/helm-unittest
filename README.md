@@ -209,6 +209,11 @@ defined in test suite files.
   -f, --file stringArray        glob paths of test files location, default to tests\*_test.yaml (default [tests\*_test.yaml])
   -q, --failfast                directly quit testing, when a test is failed (default false)
   -h, --help                    help for unittest
+      --coverage                enable template coverage reporting for rendered chart templates
+      --coverage-output-file string
+                                write template coverage report as JSON to the given file path
+      --coverage-cobertura-file string
+                                write template coverage report in Cobertura XML format (compatible with GitLab CI, GitHub Actions, Jenkins, SonarQube, etc.)
   -t, --output-type string      the file format in which test results are written, accepted types are (JUnit, NUnit, XUnit) (default XUnit)
   -o, --output-file string      the file where test results are written in the specified format, defaults no output is written to file
   -u, --update-snapshot         update the snapshot cached if needed, make sure you review the changes before updating
@@ -216,6 +221,121 @@ defined in test suite files.
       --chart-tests-path string the folder location relative to the chart where a helm chart to render test suites is located
       --skip-schema-validation  skip values schema validation when rendering the chart (default false)
 ```
+
+### Template Coverage
+
+Use `--coverage` to print a template coverage summary after test execution:
+
+```shell
+helm unittest --coverage my-chart
+```
+
+Use `--coverage-output-file` to write a JSON report:
+
+```shell
+helm unittest --coverage --coverage-output-file coverage.json my-chart
+```
+
+Use `--coverage-cobertura-file` to write a **Cobertura XML** report, which is the most widely-supported format for coverage visualisation. It is accepted natively by:
+
+| Tool | Integration |
+|---|---|
+| GitLab CI | `artifacts: reports: coverage_report: coverage_format: cobertura` |
+| GitHub Actions | `irongut/CodeCoverageSummary`, `orgoro/coverage` and others |
+| Jenkins | Cobertura plugin |
+| Azure DevOps | *Publish Code Coverage Results* task |
+| SonarQube / SonarCloud | XML coverage import |
+| Codecov / Coveralls | Cobertura format upload |
+| VS Code | *Coverage Gutters* extension |
+| IntelliJ / GoLand | Import coverage report |
+
+```shell
+helm unittest --coverage-cobertura-file coverage.xml my-chart
+```
+
+Both `--coverage-output-file` and `--coverage-cobertura-file` implicitly enable coverage collection; `--coverage` is not required when either output flag is set. Both flags can be combined.
+
+Coverage is reported at two levels:
+
+1. **Template-file coverage** — a template is considered *covered* when it is rendered with non-empty content by at least one test case. Partial templates (for example `_helpers.tpl`) are excluded from totals.
+
+2. **Branch coverage (estimate)** — each `{{if}}`, `{{else}}`, `{{range}}` and `{{with}}` block in a template source introduces conditional branches. The tracker counts how many *distinct* rendered outputs each template produces across all test cases (using different `values` files and `set` overrides), and uses that as an estimate of how many code paths were exercised.
+
+   To improve branch coverage, add test cases that render the same template with different values combinations — for example, one test with `feature.enabled: true` and one with `feature.enabled: false`.
+
+Console output example:
+
+```
+Template Coverage: 3 of 4 templates covered (75.0%)
+Branch Coverage (est.): 5 of 8 branches covered (62.5%)
+Uncovered Templates:
+    - my-chart/templates/ingress.yaml
+Low Branch Coverage:
+    - my-chart/templates/deployment.yaml (50% branch coverage, 2/4 branches)
+```
+
+JSON report shape (`--coverage-output-file`):
+
+```json
+{
+  "totalTemplates": 4,
+  "coveredTemplates": 3,
+  "coveragePercent": 75.0,
+  "totalBranches": 8,
+  "coveredBranchEstimate": 5,
+  "branchCoveragePercent": 62.5,
+  "files": [
+    {
+      "template": "my-chart/templates/deployment.yaml",
+      "hits": 2,
+      "emptyRenderHits": 0,
+      "covered": true,
+      "totalBranches": 4,
+      "coveredBranchEstimate": 2,
+      "branchCoveragePercent": 50.0
+    }
+  ]
+}
+```
+
+Cobertura XML report shape (`--coverage-cobertura-file`):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<coverage lines-valid="4" lines-covered="3" line-rate="0.75"
+          branches-valid="8" branches-covered="5" branch-rate="0.625"
+          version="helm-unittest" timestamp="…">
+  <sources><source>.</source></sources>
+  <packages>
+    <package name="my-chart/templates" line-rate="0.75" branch-rate="0.625">
+      <classes>
+        <class name="deployment.yaml" filename="my-chart/templates/deployment.yaml"
+               line-rate="1" branch-rate="0.5">
+          <lines>
+            <line number="1" hits="2" branch="true"
+                  condition-coverage="50% (2/4)">
+              <conditions>
+                <condition number="0" type="jump" coverage="50%"/>
+              </conditions>
+            </line>
+          </lines>
+        </class>
+      </classes>
+    </package>
+  </packages>
+</coverage>
+```
+
+**Cobertura mapping:**
+
+| Cobertura attribute | Coverage meaning |
+|---|---|
+| `lines-valid` / `line-rate` | Total templates / template-file coverage % |
+| `branches-valid` / `branch-rate` | Total branch points / branch coverage estimate % |
+| `<class line-rate>` | 1.0 if template was rendered, 0.0 if not |
+| `<class branch-rate>` | Per-template branch coverage estimate |
+| `<line hits>` | Number of test cases that rendered the template with non-empty content |
+| `<line condition-coverage>` | "N% (covered/total)" branch estimate for this template |
 
 ### Yaml JsonPath Support
 

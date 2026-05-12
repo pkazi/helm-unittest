@@ -219,7 +219,11 @@ type TestJob struct {
 	defaultTemplatesToSkip []string
 	// requireSuccess
 	requireRenderSuccess bool
-	config               TestConfig
+	// templates rendered in last run (file names only)
+	lastRenderedTemplateFiles []string
+	// rendered content per template in last run (template name → raw content), used for branch coverage
+	lastRenderedOutputs map[string]string
+	config              TestConfig
 }
 
 func (t *TestJob) WithConfig(config TestConfig) {
@@ -244,6 +248,8 @@ func (t *TestJob) RunV3(
 ) *results.TestJobResult {
 	startTestRun := time.Now()
 	log.WithField(LOG_TEST_JOB, "run-v3").Debug("job name ", t.Name)
+	t.lastRenderedTemplateFiles = nil
+	t.lastRenderedOutputs = nil
 	t.determineRenderSuccess()
 	result.DisplayName = t.Name
 	userValues, err := t.getUserValues()
@@ -275,6 +281,8 @@ func (t *TestJob) RunV3(
 		result.ExecError = err
 		return result
 	}
+	t.lastRenderedTemplateFiles = getRenderedTemplateFiles(manifestsOfFiles)
+	t.lastRenderedOutputs = normalizeRenderedOutputKeys(outputOfFiles, t.configOrDefault().targetChart.Name())
 	t.polishAssertionsTemplate(t.configOrDefault().targetChart.Name(), outputOfFiles)
 
 	if t.Skip.Reason != "" {
@@ -626,6 +634,33 @@ func (t *TestJob) parseManifestsFromOutputOfFiles(outputOfFiles map[string]strin
 	}
 
 	return manifestsOfFiles, nil
+}
+
+func getRenderedTemplateFiles(manifestsOfFiles map[string][]common.K8sManifest) []string {
+	renderedTemplateFiles := make([]string, 0, len(manifestsOfFiles))
+	for templateFile := range manifestsOfFiles {
+		renderedTemplateFiles = append(renderedTemplateFiles, templateFile)
+	}
+	sort.Strings(renderedTemplateFiles)
+	return renderedTemplateFiles
+}
+
+// normalizeRenderedOutputKeys applies the same key normalisation used in
+// parseManifestsFromOutputOfFiles: if a key does not already start with the
+// chart name, it is prefixed with chartName/. The result always uses forward
+// slashes so it matches keys stored in the coverage tracker.
+func normalizeRenderedOutputKeys(outputOfFiles map[string]string, chartName string) map[string]string {
+	if len(outputOfFiles) == 0 {
+		return nil
+	}
+	normalized := make(map[string]string, len(outputOfFiles))
+	for file, content := range outputOfFiles {
+		if !strings.HasPrefix(file, chartName) {
+			file = filepath.ToSlash(filepath.Join(chartName, file))
+		}
+		normalized[file] = content
+	}
+	return normalized
 }
 
 // run Assert of all assertions of test

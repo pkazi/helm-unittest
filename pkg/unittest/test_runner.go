@@ -84,18 +84,25 @@ type TestRunner struct {
 	ChartTestsPath       string
 	ValuesFiles          []string
 	OutputFile           string
+	Coverage             bool
+	CoverageOutputFile   string
+	CoverageCoberturaFile string
 	RenderPath           string
 	suiteCounting        testUnitCountingWithSnapshotFailed
 	testCounting         testUnitCounting
 	chartCounting        testUnitCounting
 	snapshotCounting     totalSnapshotCounting
 	testResults          []*results.TestSuiteResult
+	coverageTracker      *templateCoverageTracker
 }
 
 // RunV3 test suites in chart in ChartPaths.
 func (tr *TestRunner) RunV3(ChartPaths []string) bool {
 	allPassed := true
 	start := time.Now()
+	if tr.coverageEnabled() {
+		tr.coverageTracker = newTemplateCoverageTracker()
+	}
 	for _, chartPath := range ChartPaths {
 		chart, err := v3loader.Load(chartPath)
 		if err != nil {
@@ -108,6 +115,9 @@ func (tr *TestRunner) RunV3(ChartPaths []string) bool {
 			continue
 		}
 		chartRoute := chart.Name()
+		if tr.coverageEnabled() {
+			tr.coverageTracker.addChart(chartRoute, chart, tr.WithSubChart)
+		}
 		testSuites, err := tr.getV3TestSuites(chartPath, chartRoute, chart)
 		if err != nil {
 			tr.printErroredChartHeader(err)
@@ -129,8 +139,17 @@ func (tr *TestRunner) RunV3(ChartPaths []string) bool {
 	if err != nil {
 		tr.printErroredChartHeader(err)
 	}
+	err = tr.writeCoverageOutput()
+	if err != nil {
+		tr.printErroredChartHeader(err)
+	}
+	err = tr.writeCoverageCoberturaOutput()
+	if err != nil {
+		tr.printErroredChartHeader(err)
+	}
 	tr.printSnapshotSummary()
 	tr.printSummary(time.Since(start))
+	tr.printCoverageSummary()
 	return allPassed
 }
 
@@ -445,6 +464,9 @@ func (tr *TestRunner) runV3SuitesOfChart(suites []*TestSuite, chart *v3chart.Cha
 		}
 		suite.skipSchemaValidation = tr.SkipSchemaValidation
 		result := suite.RunV3(chart, snapshotCache, tr.Failfast, tr.RenderPath, &results.TestSuiteResult{})
+		if tr.coverageEnabled() {
+			tr.coverageTracker.addRenderedOutputBatches(suite.renderedOutputBatches)
+		}
 		chartPassed = chartPassed && result.Passed
 		tr.handleSuiteResult(result)
 		tr.testResults = append(tr.testResults, result)
@@ -609,4 +631,89 @@ func (tr *TestRunner) writeTestOutput() error {
 	}
 
 	return nil
+}
+
+func (tr *TestRunner) coverageEnabled() bool {
+	return tr.Coverage || tr.CoverageOutputFile != "" || tr.CoverageCoberturaFile != ""
+}
+
+func (tr *TestRunner) writeCoverageOutput() error {
+	if tr.CoverageOutputFile == "" {
+		return nil
+	}
+
+	if tr.coverageTracker == nil {
+		return nil
+	}
+
+	return tr.coverageTracker.write(tr.CoverageOutputFile)
+}
+
+func (tr *TestRunner) writeCoverageCoberturaOutput() error {
+	if tr.CoverageCoberturaFile == "" {
+		return nil
+	}
+
+	if tr.coverageTracker == nil {
+		return nil
+	}
+
+	return tr.coverageTracker.writeCobertura(tr.CoverageCoberturaFile)
+}
+
+func (tr *TestRunner) printCoverageSummary() {
+	if !tr.coverageEnabled() {
+		return
+	}
+
+	if tr.coverageTracker == nil {
+		return
+	}
+
+	report := tr.coverageTracker.report()
+	if report.TotalTemplates == 0 {
+		tr.Printer.Println("\nTemplate Coverage: no templates discovered", 0)
+		return
+	}
+
+	coverageSummary := fmt.Sprintf(
+		"\nTemplate Coverage: %d of %d templates covered (%.1f%%)",
+		report.CoveredTemplates,
+		report.TotalTemplates,
+		report.CoveragePercent,
+	)
+	tr.Printer.Println(coverageSummary, 0)
+
+	branchSummary := fmt.Sprintf(
+		"Branch Coverage (est.): %d of %d branches covered (%.1f%%)",
+		report.CoveredBranchEstimate,
+		report.TotalBranches,
+		report.BranchCoveragePercent,
+	)
+	tr.Printer.Println(branchSummary, 0)
+
+	uncovered := make([]string, 0)
+	lowBranch := make([]string, 0)
+	for _, file := range report.Files {
+		if !file.Covered {
+			uncovered = append(uncovered, file.Template)
+		} else if file.BranchCoveragePercent < 100 {
+			lowBranch = append(lowBranch, fmt.Sprintf("%s (%.0f%% branch coverage, %d/%d branches)",
+				file.Template, file.BranchCoveragePercent, file.CoveredBranchEstimate, file.TotalBranches))
+		}
+	}
+
+	if len(uncovered) > 0 {
+		tr.Printer.Println("Uncovered Templates:", 0)
+		for _, file := range uncovered {
+			tr.Printer.Println(fmt.Sprintf("- %s", file), 1)
+		}
+	}
+
+	if len(lowBranch) > 0 {
+		tr.Printer.Println("Low Branch Coverage:", 0)
+		for _, file := range lowBranch {
+			tr.Printer.Println(fmt.Sprintf("- %s", file), 1)
+		}
+	}
 }
