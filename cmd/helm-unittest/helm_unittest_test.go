@@ -361,6 +361,51 @@ func TestValidateUnittestSkipSchemaValidationFlag(t *testing.T) {
 	}
 }
 
+func TestValidateUnittestCoverageFlag(t *testing.T) {
+	a := assert.New(t)
+
+	coverageFlags := map[string]bool{
+		"":                 false,
+		"--coverage":       true,
+		"--coverage=true":  true,
+		"--coverage=false": false,
+	}
+
+	for coverageFlag, expected := range coverageFlags {
+		cmd := setupTestCmd()
+		if len(coverageFlag) > 0 {
+			cmd.SetArgs([]string{coverageFlag})
+		}
+
+		err := cmd.Execute()
+		runner := GetTestRunner()
+
+		a.Nil(err)
+		a.Equal(expected, runner.Coverage)
+	}
+}
+
+func TestValidateUnittestCoverageOutputFileFlag(t *testing.T) {
+	a := assert.New(t)
+	coverageOutputFile := "coverage.json"
+	defer func() {
+		ferr := os.Remove(coverageOutputFile)
+		if ferr != nil && !os.IsNotExist(ferr) {
+			a.NoError(ferr)
+		}
+	}()
+
+	cmd := setupTestCmd()
+	cmd.SetArgs([]string{"--coverage-output-file", coverageOutputFile})
+
+	err := cmd.Execute()
+	runner := GetTestRunner()
+
+	a.Nil(err)
+	a.Equal(coverageOutputFile, runner.CoverageOutputFile)
+	a.True(runner.Coverage)
+}
+
 // Using %T
 func typeofObject(variable any) string {
 	return fmt.Sprintf("%T", variable)

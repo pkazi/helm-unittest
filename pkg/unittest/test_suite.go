@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
@@ -243,7 +244,9 @@ type TestSuite struct {
 	skipSchemaValidation bool
 	// An identifier to append to snapshot files
 	SnapshotId string `yaml:"snapshotId"`
-	Skip       struct {
+	// templates rendered in last run
+	renderedTemplateFiles []string
+	Skip                  struct {
 		// The reason for skipping the test suite
 		Reason string `yaml:"reason"`
 		// If the plugin version is less than the minimum version, skip the test suite
@@ -275,6 +278,7 @@ func (s *TestSuite) RunV3(
 	result.FailFast = r.FailFast
 	result.TestsResult = r.JobResults
 	result.Skipped = r.Skip
+	s.renderedTemplateFiles = r.RenderedTemplates
 
 	result.CountSnapshot(snapshotCache)
 	return result
@@ -377,10 +381,11 @@ func (s *TestSuite) polishChartSettings(test *TestJob) {
 }
 
 type SuiteResult struct {
-	Pass       bool
-	FailFast   bool
-	Skip       bool
-	JobResults []*results.TestJobResult
+	Pass              bool
+	FailFast          bool
+	Skip              bool
+	JobResults        []*results.TestJobResult
+	RenderedTemplates []string
 }
 
 func (s *TestSuite) runV3TestJobs(
@@ -391,6 +396,7 @@ func (s *TestSuite) runV3TestJobs(
 ) *SuiteResult {
 	result := SuiteResult{Pass: false, FailFast: false, Skip: false}
 	jobResults := make([]*results.TestJobResult, len(s.Tests))
+	renderedTemplateSet := make(map[string]struct{})
 	skipped := 0
 
 	for idx, testJob := range s.Tests {
@@ -418,6 +424,9 @@ func (s *TestSuite) runV3TestJobs(
 			))
 			jobResult = testJob.RunV3(&job)
 			jobResults[idx] = jobResult
+			for _, renderedTemplate := range testJob.lastRenderedTemplateFiles {
+				renderedTemplateSet[renderedTemplate] = struct{}{}
+			}
 			if idx == 0 {
 				result.Pass = jobResult.Passed
 			}
@@ -431,6 +440,11 @@ func (s *TestSuite) runV3TestJobs(
 	}
 	result.Skip = skipped == len(s.Tests)
 	result.JobResults = jobResults
+	result.RenderedTemplates = make([]string, 0, len(renderedTemplateSet))
+	for renderedTemplate := range renderedTemplateSet {
+		result.RenderedTemplates = append(result.RenderedTemplates, renderedTemplate)
+	}
+	sort.Strings(result.RenderedTemplates)
 	return &result
 }
 

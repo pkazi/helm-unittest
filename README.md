@@ -209,6 +209,9 @@ defined in test suite files.
   -f, --file stringArray        glob paths of test files location, default to tests\*_test.yaml (default [tests\*_test.yaml])
   -q, --failfast                directly quit testing, when a test is failed (default false)
   -h, --help                    help for unittest
+      --coverage                enable template coverage reporting for rendered chart templates
+      --coverage-output-file string
+                                write template coverage report as JSON to the given file path
   -t, --output-type string      the file format in which test results are written, accepted types are (JUnit, NUnit, XUnit) (default XUnit)
   -o, --output-file string      the file where test results are written in the specified format, defaults no output is written to file
   -u, --update-snapshot         update the snapshot cached if needed, make sure you review the changes before updating
@@ -216,6 +219,22 @@ defined in test suite files.
       --chart-tests-path string the folder location relative to the chart where a helm chart to render test suites is located
       --skip-schema-validation  skip values schema validation when rendering the chart (default false)
 ```
+
+### Template Coverage
+
+Use `--coverage` to print a template coverage summary after test execution:
+
+```shell
+helm unittest --coverage my-chart
+```
+
+Use `--coverage-output-file` to write a JSON report:
+
+```shell
+helm unittest --coverage --coverage-output-file coverage.json my-chart
+```
+
+Coverage in this first version is template-file coverage. A template is considered covered when it is rendered by at least one executed test case. Partial templates (for example `_helpers.tpl`) are excluded from totals.
 
 ### Yaml JsonPath Support
 

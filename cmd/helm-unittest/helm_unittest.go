@@ -22,10 +22,12 @@ type testOptions struct {
 	updateSnapshot          bool
 	withSubChart            bool
 	useSkipSchemaValidation bool
+	enableCoverage          bool
 	testFiles               []string
 	valuesFiles             []string
 	outputFile              string
 	outputType              string
+	coverageOutputFile      string
 	chartTestsPath          string
 }
 
@@ -102,6 +104,8 @@ func RunPlugin(cmd *cobra.Command, chartPaths []string) {
 		TestFiles:            testConfig.testFiles,
 		ValuesFiles:          testConfig.valuesFiles,
 		OutputFile:           testConfig.outputFile,
+		Coverage:             testConfig.enableCoverage || testConfig.coverageOutputFile != "",
+		CoverageOutputFile:   testConfig.coverageOutputFile,
 		ChartTestsPath:       testConfig.chartTestsPath,
 		RenderPath:           renderPath,
 	}
@@ -169,6 +173,16 @@ func InitPluginFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().StringVarP(
 		&testConfig.outputType, "output-type", "t", "XUnit",
 		"output-type the file-format where testresults are written in, accepted types are (JUnit, NUnit, XUnit, Sonar)",
+	)
+
+	cmd.PersistentFlags().BoolVar(
+		&testConfig.enableCoverage, "coverage", false,
+		"enable template coverage reporting for rendered chart templates",
+	)
+
+	cmd.PersistentFlags().StringVar(
+		&testConfig.coverageOutputFile, "coverage-output-file", "",
+		"write template coverage report as JSON to the given file path",
 	)
 
 	cmd.PersistentFlags().StringVar(
