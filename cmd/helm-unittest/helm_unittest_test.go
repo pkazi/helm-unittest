@@ -412,3 +412,26 @@ func TestValidateUnittestCoverageOutputFileFlag(t *testing.T) {
 func typeofObject(variable any) string {
 	return fmt.Sprintf("%T", variable)
 }
+
+func TestValidateUnittestCoverageCoberturaFileFlag(t *testing.T) {
+a := assert.New(t)
+coberturaFile := "coverage.xml"
+defer func() {
+ferr := os.Remove(coberturaFile)
+if ferr != nil && !os.IsNotExist(ferr) {
+a.NoError(ferr)
+}
+}()
+
+cmd := setupTestCmd()
+cmd.SetArgs([]string{"--coverage-cobertura-file", coberturaFile})
+
+err := cmd.Execute()
+runner := GetTestRunner()
+
+a.Nil(err)
+a.Equal(coberturaFile, runner.CoverageCoberturaFile)
+a.True(runner.Coverage)
+_, statErr := os.Stat(coberturaFile)
+a.NoError(statErr)
+}

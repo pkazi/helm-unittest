@@ -3,6 +3,7 @@ package unittest_test
 import (
 	"bytes"
 	"encoding/json"
+	"encoding/xml"
 	"os"
 	"path/filepath"
 	"testing"
@@ -250,4 +251,141 @@ tests:
 
 	// The "Low Branch Coverage" section should appear in the console output
 	assert.Contains(t, buffer.String(), "Low Branch Coverage:")
+}
+
+// TestV3RunnerCoberturaReport verifies that a valid Cobertura XML coverage report is written
+// when --coverage-cobertura-file is specified. It checks that the root attributes and per-class
+// branch/line attributes match expected values.
+func TestV3RunnerCoberturaReport(t *testing.T) {
+chartYaml := `
+apiVersion: v2
+name: cobertcov
+version: 0.1.0
+`
+// Template with one {{if}} block → 2 branches
+serviceTemplate := `{{- if .Values.service.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-service
+{{- end }}
+`
+// Test 1: enabled=true  (non-empty render)
+testEnabled := `
+suite: service enabled
+templates:
+  - templates/service.yaml
+tests:
+  - it: service enabled
+    set:
+      service.enabled: true
+    asserts:
+      - isKind:
+          of: Service
+`
+// Test 2: enabled=false (empty render – exercises the false branch)
+testDisabled := `
+suite: service disabled
+templates:
+  - templates/service.yaml
+tests:
+  - it: service disabled
+    set:
+      service.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+`
+
+tmp := t.TempDir()
+coberturaPath := filepath.Join(tmp, "coverage.xml")
+
+files := map[string][]byte{
+"chart/Chart.yaml":              []byte(chartYaml),
+"chart/templates/service.yaml":  []byte(serviceTemplate),
+"chart/tests/enabled_test.yaml":  []byte(testEnabled),
+"chart/tests/disabled_test.yaml": []byte(testDisabled),
+}
+for relPath, data := range files {
+fullPath := filepath.Join(tmp, relPath)
+assert.NoError(t, os.MkdirAll(filepath.Dir(fullPath), 0755))
+assert.NoError(t, os.WriteFile(fullPath, data, 0644))
+}
+
+buffer := new(bytes.Buffer)
+runner := TestRunner{
+Printer:               printer.NewPrinter(buffer, nil),
+TestFiles:             []string{"tests/*_test.yaml"},
+Coverage:              true,
+CoverageCoberturaFile: coberturaPath,
+}
+
+passed := runner.RunV3([]string{filepath.Join(tmp, "chart")})
+assert.True(t, passed, buffer.String())
+
+xmlBytes, err := os.ReadFile(coberturaPath)
+assert.NoError(t, err)
+assert.NotEmpty(t, xmlBytes)
+
+// Parse the generated XML into a generic structure for assertion.
+type xmlCondition struct {
+Coverage string `xml:"coverage,attr"`
+}
+type xmlLine struct {
+Number            int            `xml:"number,attr"`
+Hits              int            `xml:"hits,attr"`
+Branch            bool           `xml:"branch,attr"`
+ConditionCoverage string         `xml:"condition-coverage,attr"`
+Conditions        []xmlCondition `xml:"conditions>condition"`
+}
+type xmlClass struct {
+Name       string    `xml:"name,attr"`
+LineRate   float64   `xml:"line-rate,attr"`
+BranchRate float64   `xml:"branch-rate,attr"`
+Lines      []xmlLine `xml:"lines>line"`
+}
+type xmlPackage struct {
+Name    string     `xml:"name,attr"`
+Classes []xmlClass `xml:"classes>class"`
+}
+type xmlCoverage struct {
+XMLName         xml.Name     `xml:"coverage"`
+LinesValid      int          `xml:"lines-valid,attr"`
+LinesCovered    int          `xml:"lines-covered,attr"`
+LineRate        float64      `xml:"line-rate,attr"`
+BranchesValid   int          `xml:"branches-valid,attr"`
+BranchesCovered int          `xml:"branches-covered,attr"`
+BranchRate      float64      `xml:"branch-rate,attr"`
+Packages        []xmlPackage `xml:"packages>package"`
+}
+
+var cov xmlCoverage
+assert.NoError(t, xml.Unmarshal(xmlBytes, &cov))
+
+// Top-level attributes
+assert.Equal(t, 1, cov.LinesValid, "one template = one line")
+assert.Equal(t, 1, cov.LinesCovered, "template was rendered non-empty")
+assert.InDelta(t, 1.0, cov.LineRate, 0.001)
+assert.Equal(t, 2, cov.BranchesValid, "{{if}} block → 2 branches")
+assert.Equal(t, 2, cov.BranchesCovered, "both branches exercised")
+assert.InDelta(t, 1.0, cov.BranchRate, 0.001)
+
+// Package and class structure
+assert.Len(t, cov.Packages, 1)
+pkg := cov.Packages[0]
+assert.Equal(t, "cobertcov/templates", pkg.Name)
+assert.Len(t, pkg.Classes, 1)
+
+cls := pkg.Classes[0]
+assert.Equal(t, "service.yaml", cls.Name)
+assert.InDelta(t, 1.0, cls.LineRate, 0.001)
+assert.InDelta(t, 1.0, cls.BranchRate, 0.001)
+
+// Line details
+assert.Len(t, cls.Lines, 1)
+line := cls.Lines[0]
+assert.Equal(t, 1, line.Number)
+assert.Equal(t, 1, line.Hits)     // one non-empty render
+assert.True(t, line.Branch)        // has conditional branches
+assert.Contains(t, line.ConditionCoverage, "100%")
 }

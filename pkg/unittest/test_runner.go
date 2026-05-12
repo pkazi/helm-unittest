@@ -86,6 +86,7 @@ type TestRunner struct {
 	OutputFile           string
 	Coverage             bool
 	CoverageOutputFile   string
+	CoverageCoberturaFile string
 	RenderPath           string
 	suiteCounting        testUnitCountingWithSnapshotFailed
 	testCounting         testUnitCounting
@@ -139,6 +140,10 @@ func (tr *TestRunner) RunV3(ChartPaths []string) bool {
 		tr.printErroredChartHeader(err)
 	}
 	err = tr.writeCoverageOutput()
+	if err != nil {
+		tr.printErroredChartHeader(err)
+	}
+	err = tr.writeCoverageCoberturaOutput()
 	if err != nil {
 		tr.printErroredChartHeader(err)
 	}
@@ -629,7 +634,7 @@ func (tr *TestRunner) writeTestOutput() error {
 }
 
 func (tr *TestRunner) coverageEnabled() bool {
-	return tr.Coverage || tr.CoverageOutputFile != ""
+	return tr.Coverage || tr.CoverageOutputFile != "" || tr.CoverageCoberturaFile != ""
 }
 
 func (tr *TestRunner) writeCoverageOutput() error {
@@ -642,6 +647,18 @@ func (tr *TestRunner) writeCoverageOutput() error {
 	}
 
 	return tr.coverageTracker.write(tr.CoverageOutputFile)
+}
+
+func (tr *TestRunner) writeCoverageCoberturaOutput() error {
+	if tr.CoverageCoberturaFile == "" {
+		return nil
+	}
+
+	if tr.coverageTracker == nil {
+		return nil
+	}
+
+	return tr.coverageTracker.writeCobertura(tr.CoverageCoberturaFile)
 }
 
 func (tr *TestRunner) printCoverageSummary() {

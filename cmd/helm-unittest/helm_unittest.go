@@ -28,6 +28,7 @@ type testOptions struct {
 	outputFile              string
 	outputType              string
 	coverageOutputFile      string
+	coverageCoberturaFile   string
 	chartTestsPath          string
 }
 
@@ -104,8 +105,9 @@ func RunPlugin(cmd *cobra.Command, chartPaths []string) {
 		TestFiles:            testConfig.testFiles,
 		ValuesFiles:          testConfig.valuesFiles,
 		OutputFile:           testConfig.outputFile,
-		Coverage:             testConfig.enableCoverage || testConfig.coverageOutputFile != "",
+		Coverage:             testConfig.enableCoverage || testConfig.coverageOutputFile != "" || testConfig.coverageCoberturaFile != "",
 		CoverageOutputFile:   testConfig.coverageOutputFile,
+		CoverageCoberturaFile: testConfig.coverageCoberturaFile,
 		ChartTestsPath:       testConfig.chartTestsPath,
 		RenderPath:           renderPath,
 	}
@@ -183,6 +185,11 @@ func InitPluginFlags(cmd *cobra.Command) {
 	cmd.PersistentFlags().StringVar(
 		&testConfig.coverageOutputFile, "coverage-output-file", "",
 		"write template coverage report as JSON to the given file path",
+	)
+
+	cmd.PersistentFlags().StringVar(
+		&testConfig.coverageCoberturaFile, "coverage-cobertura-file", "",
+		"write template coverage report in Cobertura XML format to the given file path (compatible with GitLab CI, GitHub Actions, Jenkins, SonarQube, etc.)",
 	)
 
 	cmd.PersistentFlags().StringVar(

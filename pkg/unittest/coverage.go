@@ -2,13 +2,16 @@ package unittest
 
 import (
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
 	"hash/fnv"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
 	"text/template/parse"
+	"time"
 
 	sprig "github.com/Masterminds/sprig/v3"
 	v3chart "helm.sh/helm/v3/pkg/chart"
@@ -277,5 +280,208 @@ func (tracker *templateCoverageTracker) write(reportPath string) error {
 		return fmt.Errorf("failed to write coverage report: %w", encodeErr)
 	}
 
+	return nil
+}
+
+// ─── Cobertura XML types ────────────────────────────────────────────────────
+// Cobertura XML is the most widely-supported coverage format:
+//   - GitLab CI (native artifacts.reports.coverage_report)
+//   - GitHub Actions (irongut/CodeCoverageSummary, orgoro/coverage, etc.)
+//   - Jenkins (Cobertura plugin)
+//   - Azure DevOps (Publish Code Coverage Results task)
+//   - SonarQube / SonarCloud
+//   - IntelliJ IDEA, VS Code (Coverage Gutters extension)
+//   - Codecov / Coveralls
+
+type coberturaCondition struct {
+	Number   int    `xml:"number,attr"`
+	Type     string `xml:"type,attr"`
+	Coverage string `xml:"coverage,attr"`
+}
+
+type coberturaConditions struct {
+	Conditions []coberturaCondition `xml:"condition"`
+}
+
+type coberturaLine struct {
+	Number            int                  `xml:"number,attr"`
+	Hits              int                  `xml:"hits,attr"`
+	Branch            bool                 `xml:"branch,attr"`
+	ConditionCoverage string               `xml:"condition-coverage,attr,omitempty"`
+	Conditions        *coberturaConditions `xml:"conditions,omitempty"`
+}
+
+type coberturaLines struct {
+	Lines []coberturaLine `xml:"line"`
+}
+
+// coberturaClass maps to one template file.
+type coberturaClass struct {
+	Name       string         `xml:"name,attr"`
+	Filename   string         `xml:"filename,attr"`
+	LineRate   float64        `xml:"line-rate,attr"`
+	BranchRate float64        `xml:"branch-rate,attr"`
+	Complexity int            `xml:"complexity,attr"`
+	Methods    struct{}       `xml:"methods"`
+	Lines      coberturaLines `xml:"lines"`
+}
+
+type coberturaClasses struct {
+	Classes []coberturaClass `xml:"class"`
+}
+
+// coberturaPackage groups template files by their directory prefix.
+type coberturaPackage struct {
+	Name       string           `xml:"name,attr"`
+	LineRate   float64          `xml:"line-rate,attr"`
+	BranchRate float64          `xml:"branch-rate,attr"`
+	Complexity int              `xml:"complexity,attr"`
+	Classes    coberturaClasses `xml:"classes"`
+}
+
+type coberturaPackages struct {
+	Packages []coberturaPackage `xml:"package"`
+}
+
+type coberturaSources struct {
+	Sources []string `xml:"source"`
+}
+
+// coberturaCoverage is the root element of a Cobertura XML report.
+type coberturaCoverage struct {
+	XMLName         xml.Name          `xml:"coverage"`
+	LinesValid      int               `xml:"lines-valid,attr"`
+	LinesCovered    int               `xml:"lines-covered,attr"`
+	LineRate        float64           `xml:"line-rate,attr"`
+	BranchesValid   int               `xml:"branches-valid,attr"`
+	BranchesCovered int               `xml:"branches-covered,attr"`
+	BranchRate      float64           `xml:"branch-rate,attr"`
+	Version         string            `xml:"version,attr"`
+	Timestamp       int64             `xml:"timestamp,attr"`
+	Sources         coberturaSources  `xml:"sources"`
+	Packages        coberturaPackages `xml:"packages"`
+}
+
+// writeCobertura writes the coverage data in Cobertura XML format, which is
+// supported by GitLab CI, GitHub Actions, Jenkins, Azure DevOps, SonarQube,
+// Codecov, and IDE plugins.
+//
+// Mapping to Cobertura concepts:
+//   - Each chart template directory  → a <package>
+//   - Each template file             → a <class> with one <line number="1">
+//   - line-rate                      → 1.0 if the template rendered non-empty, 0.0 otherwise
+//   - branch-rate                    → coveredBranchEstimate / totalBranches per template
+func (tracker *templateCoverageTracker) writeCobertura(reportPath string) error {
+	rep := tracker.report()
+
+	// Group files by package (directory prefix).
+	pkgMap := make(map[string][]templateCoverageFile)
+	for _, file := range rep.Files {
+		dir := filepath.ToSlash(filepath.Dir(file.Template))
+		pkgMap[dir] = append(pkgMap[dir], file)
+	}
+
+	pkgNames := make([]string, 0, len(pkgMap))
+	for pkg := range pkgMap {
+		pkgNames = append(pkgNames, pkg)
+	}
+	sort.Strings(pkgNames)
+
+	packages := make([]coberturaPackage, 0, len(pkgNames))
+	for _, pkgName := range pkgNames {
+		files := pkgMap[pkgName]
+
+		pkgLinesCovered := 0
+		pkgBranchesCovered := 0
+		pkgBranchesValid := 0
+
+		classes := make([]coberturaClass, 0, len(files))
+		for _, f := range files {
+			lineRate := 0.0
+			if f.Covered {
+				lineRate = 1.0
+				pkgLinesCovered++
+			}
+			branchRate := f.BranchCoveragePercent / 100
+			pkgBranchesCovered += f.CoveredBranchEstimate
+			pkgBranchesValid += f.TotalBranches
+
+			// Templates with more than one branch point carry branch information.
+			hasBranches := f.TotalBranches > 1
+			line := coberturaLine{
+				Number: 1,
+				Hits:   int(f.Hits),
+				Branch: hasBranches,
+			}
+			if hasBranches {
+				pct := int(math.Round(f.BranchCoveragePercent))
+				line.ConditionCoverage = fmt.Sprintf("%d%% (%d/%d)", pct, f.CoveredBranchEstimate, f.TotalBranches)
+				line.Conditions = &coberturaConditions{
+					Conditions: []coberturaCondition{
+						{Number: 0, Type: "jump", Coverage: fmt.Sprintf("%d%%", pct)},
+					},
+				}
+			}
+
+			classes = append(classes, coberturaClass{
+				Name:       filepath.Base(f.Template),
+				Filename:   f.Template,
+				LineRate:   lineRate,
+				BranchRate: branchRate,
+				Lines:      coberturaLines{Lines: []coberturaLine{line}},
+			})
+		}
+
+		var pkgLineRate, pkgBranchRate float64
+		if n := len(files); n > 0 {
+			pkgLineRate = float64(pkgLinesCovered) / float64(n)
+		}
+		if pkgBranchesValid > 0 {
+			pkgBranchRate = float64(pkgBranchesCovered) / float64(pkgBranchesValid)
+		}
+
+		packages = append(packages, coberturaPackage{
+			Name:       pkgName,
+			LineRate:   pkgLineRate,
+			BranchRate: pkgBranchRate,
+			Classes:    coberturaClasses{Classes: classes},
+		})
+	}
+
+	var lineRate, branchRate float64
+	if rep.TotalTemplates > 0 {
+		lineRate = float64(rep.CoveredTemplates) / float64(rep.TotalTemplates)
+	}
+	if rep.TotalBranches > 0 {
+		branchRate = float64(rep.CoveredBranchEstimate) / float64(rep.TotalBranches)
+	}
+
+	cov := coberturaCoverage{
+		LinesValid:      rep.TotalTemplates,
+		LinesCovered:    rep.CoveredTemplates,
+		LineRate:        lineRate,
+		BranchesValid:   rep.TotalBranches,
+		BranchesCovered: rep.CoveredBranchEstimate,
+		BranchRate:      branchRate,
+		Version:         "helm-unittest",
+		Timestamp:       time.Now().Unix(),
+		Sources:         coberturaSources{Sources: []string{"."}},
+		Packages:        coberturaPackages{Packages: packages},
+	}
+
+	f, err := os.Create(reportPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+
+	if _, err := f.WriteString(xml.Header); err != nil {
+		return fmt.Errorf("failed to write Cobertura XML header: %w", err)
+	}
+	enc := xml.NewEncoder(f)
+	enc.Indent("", "  ")
+	if err := enc.Encode(cov); err != nil {
+		return fmt.Errorf("failed to write Cobertura XML report: %w", err)
+	}
 	return nil
 }
