@@ -216,14 +216,17 @@ func (tracker *templateCoverageTracker) report() templateCoverageReport {
 		}
 
 		// For templates with no conditional branches, treat as a single implicit branch
-		// so that covered/uncovered templates are still represented in branch totals.
+		// so that covered/uncovered templates without conditionals still contribute to
+		// aggregate branch totals and produce a meaningful 0%/100% per-template metric.
 		effectiveTotalBranches := totalBranches
 		if effectiveTotalBranches == 0 {
 			effectiveTotalBranches = 1
 		}
 
 		// Each distinct rendered output represents a different combination of branch
-		// paths being taken. Cap the estimate at the total branch count.
+		// paths being taken. Cap the estimate at the total branch count to avoid
+		// over-reporting: hash collisions or dynamically generated content (e.g. random
+		// suffixes) could otherwise produce more distinct hashes than there are branches.
 		coveredBranchEst := distinctCount
 		if coveredBranchEst > effectiveTotalBranches {
 			coveredBranchEst = effectiveTotalBranches

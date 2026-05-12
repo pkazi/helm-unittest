@@ -176,9 +176,9 @@ tests:
 	assert.InDelta(t, 100.0, report["branchCoveragePercent"], 0.01)
 
 	// Per-file details
-	files2 := report["files"].([]any)
-	assert.Len(t, files2, 1)
-	fileEntry := files2[0].(map[string]any)
+	reportFiles := report["files"].([]any)
+	assert.Len(t, reportFiles, 1)
+	fileEntry := reportFiles[0].(map[string]any)
 	assert.Equal(t, "branchcov/templates/service.yaml", fileEntry["template"])
 	assert.InDelta(t, 100.0, fileEntry["branchCoveragePercent"], 0.01)
 }
