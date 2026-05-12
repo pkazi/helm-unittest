@@ -638,7 +638,7 @@ func (tr *TestRunner) writeCoverageOutput() error {
 	}
 
 	if tr.coverageTracker == nil {
-		tr.coverageTracker = newTemplateCoverageTracker()
+		return nil
 	}
 
 	return tr.coverageTracker.write(tr.CoverageOutputFile)
@@ -650,7 +650,7 @@ func (tr *TestRunner) printCoverageSummary() {
 	}
 
 	if tr.coverageTracker == nil {
-		tr.coverageTracker = newTemplateCoverageTracker()
+		return
 	}
 
 	report := tr.coverageTracker.report()

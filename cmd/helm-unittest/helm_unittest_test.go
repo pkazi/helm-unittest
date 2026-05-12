@@ -404,6 +404,8 @@ func TestValidateUnittestCoverageOutputFileFlag(t *testing.T) {
 	a.Nil(err)
 	a.Equal(coverageOutputFile, runner.CoverageOutputFile)
 	a.True(runner.Coverage)
+	_, statErr := os.Stat(coverageOutputFile)
+	a.NoError(statErr)
 }
 
 // Using %T
