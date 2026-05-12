@@ -234,7 +234,48 @@ Use `--coverage-output-file` to write a JSON report:
 helm unittest --coverage --coverage-output-file coverage.json my-chart
 ```
 
-Coverage in this first version is template-file coverage. A template is considered covered when it is rendered by at least one executed test case. Partial templates (for example `_helpers.tpl`) are excluded from totals.
+Coverage is reported at two levels:
+
+1. **Template-file coverage** — a template is considered *covered* when it is rendered with non-empty content by at least one test case. Partial templates (for example `_helpers.tpl`) are excluded from totals.
+
+2. **Branch coverage (estimate)** — each `{{if}}`, `{{else}}`, `{{range}}` and `{{with}}` block in a template source introduces conditional branches. The tracker counts how many *distinct* rendered outputs each template produces across all test cases (using different `values` files and `set` overrides), and uses that as an estimate of how many code paths were exercised.
+
+   To improve branch coverage, add test cases that render the same template with different values combinations — for example, one test with `feature.enabled: true` and one with `feature.enabled: false`.
+
+Console output example:
+
+```
+Template Coverage: 3 of 4 templates covered (75.0%)
+Branch Coverage (est.): 5 of 8 branches covered (62.5%)
+Uncovered Templates:
+    - my-chart/templates/ingress.yaml
+Low Branch Coverage:
+    - my-chart/templates/deployment.yaml (50% branch coverage, 2/4 branches)
+```
+
+JSON report shape:
+
+```json
+{
+  "totalTemplates": 4,
+  "coveredTemplates": 3,
+  "coveragePercent": 75.0,
+  "totalBranches": 8,
+  "coveredBranchEstimate": 5,
+  "branchCoveragePercent": 62.5,
+  "files": [
+    {
+      "template": "my-chart/templates/deployment.yaml",
+      "hits": 2,
+      "emptyRenderHits": 0,
+      "covered": true,
+      "totalBranches": 4,
+      "coveredBranchEstimate": 2,
+      "branchCoveragePercent": 50.0
+    }
+  ]
+}
+```
 
 ### Yaml JsonPath Support
 

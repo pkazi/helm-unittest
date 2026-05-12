@@ -460,7 +460,7 @@ func (tr *TestRunner) runV3SuitesOfChart(suites []*TestSuite, chart *v3chart.Cha
 		suite.skipSchemaValidation = tr.SkipSchemaValidation
 		result := suite.RunV3(chart, snapshotCache, tr.Failfast, tr.RenderPath, &results.TestSuiteResult{})
 		if tr.coverageEnabled() {
-			tr.coverageTracker.addRenderedTemplates(suite.renderedTemplateFiles)
+			tr.coverageTracker.addRenderedOutputBatches(suite.renderedOutputBatches)
 		}
 		chartPassed = chartPassed && result.Passed
 		tr.handleSuiteResult(result)
@@ -667,18 +667,36 @@ func (tr *TestRunner) printCoverageSummary() {
 	)
 	tr.Printer.Println(coverageSummary, 0)
 
+	branchSummary := fmt.Sprintf(
+		"Branch Coverage (est.): %d of %d branches covered (%.1f%%)",
+		report.CoveredBranchEstimate,
+		report.TotalBranches,
+		report.BranchCoveragePercent,
+	)
+	tr.Printer.Println(branchSummary, 0)
+
 	uncovered := make([]string, 0)
+	lowBranch := make([]string, 0)
 	for _, file := range report.Files {
 		if !file.Covered {
 			uncovered = append(uncovered, file.Template)
+		} else if file.BranchCoveragePercent < 100 {
+			lowBranch = append(lowBranch, fmt.Sprintf("%s (%.0f%% branch coverage, %d/%d branches)",
+				file.Template, file.BranchCoveragePercent, file.CoveredBranchEstimate, file.TotalBranches))
 		}
 	}
-	if len(uncovered) == 0 {
-		return
+
+	if len(uncovered) > 0 {
+		tr.Printer.Println("Uncovered Templates:", 0)
+		for _, file := range uncovered {
+			tr.Printer.Println(fmt.Sprintf("- %s", file), 1)
+		}
 	}
 
-	tr.Printer.Println("Uncovered Templates:", 0)
-	for _, file := range uncovered {
-		tr.Printer.Println(fmt.Sprintf("- %s", file), 1)
+	if len(lowBranch) > 0 {
+		tr.Printer.Println("Low Branch Coverage:", 0)
+		for _, file := range lowBranch {
+			tr.Printer.Println(fmt.Sprintf("- %s", file), 1)
+		}
 	}
 }

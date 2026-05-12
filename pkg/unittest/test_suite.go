@@ -246,6 +246,8 @@ type TestSuite struct {
 	SnapshotId string `yaml:"snapshotId"`
 	// templates rendered in last run
 	renderedTemplateFiles []string
+	// per-job rendered output batches for branch coverage tracking
+	renderedOutputBatches []map[string]string
 	Skip                  struct {
 		// The reason for skipping the test suite
 		Reason string `yaml:"reason"`
@@ -279,6 +281,7 @@ func (s *TestSuite) RunV3(
 	result.TestsResult = r.JobResults
 	result.Skipped = r.Skip
 	s.renderedTemplateFiles = r.RenderedTemplates
+	s.renderedOutputBatches = r.RenderedOutputBatches
 
 	result.CountSnapshot(snapshotCache)
 	return result
@@ -381,11 +384,12 @@ func (s *TestSuite) polishChartSettings(test *TestJob) {
 }
 
 type SuiteResult struct {
-	Pass              bool
-	FailFast          bool
-	Skip              bool
-	JobResults        []*results.TestJobResult
-	RenderedTemplates []string
+	Pass                 bool
+	FailFast             bool
+	Skip                 bool
+	JobResults           []*results.TestJobResult
+	RenderedTemplates    []string
+	RenderedOutputBatches []map[string]string // one entry per test case: template name → rendered content
 }
 
 func (s *TestSuite) runV3TestJobs(
@@ -426,6 +430,10 @@ func (s *TestSuite) runV3TestJobs(
 			jobResults[idx] = jobResult
 			for _, renderedTemplate := range testJob.lastRenderedTemplateFiles {
 				renderedTemplateSet[renderedTemplate] = struct{}{}
+			}
+			// Collect per-job rendered outputs for branch coverage tracking.
+			if testJob.lastRenderedOutputs != nil {
+				result.RenderedOutputBatches = append(result.RenderedOutputBatches, testJob.lastRenderedOutputs)
 			}
 			if idx == 0 {
 				result.Pass = jobResult.Passed
